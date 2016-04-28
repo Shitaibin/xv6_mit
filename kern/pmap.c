@@ -151,7 +151,7 @@ mem_init(void)
 	// Your code goes here:
 
   pages = boot_alloc(npages * sizeof(struct PageInfo));
-  memset(pages, 0, sizeof(pages));
+  memset(pages, 0, sizeof(struct PageInfo) * npages);
 
 	//////////////////////////////////////////////////////////////////////
 	// Now that we've allocated the initial kernel data structures, we set
@@ -254,12 +254,34 @@ page_init(void)
 	// NB: DO NOT actually touch the physical memory corresponding to
 	// free pages!
 	size_t i;
-	for (i = 0; i < npages; i++) {
-    if (i == 0 || ((i >= PGNUM(IOPHYSMEM) && 
-        i <= PGNUM(end - KERNBASE + PGSIZE + n * sizeof(struct PageInfo))))) {
-      pages[i].pp_ref = 1;
-      pages[i].pp_link = NULL;
-    }
+  size_t first_free_byte, first_free_page;
+  
+  // 1)
+  pages[0].pp_ref = 1;
+
+  // 2)
+  for (i = 1; i < npages_basemem; i++) {
+    pages[i].pp_ref = 0;
+    pages[i].pp_link = page_free_list;
+    page_free_list = &pages[i];
+  }
+
+  // 3)
+  for (i = IOPHYSMEM/PGSIZE; i < EXTPHYSMEM/PGSIZE; i++) {
+    pages[i].pp_ref = 1;
+  }
+
+  // 4
+  first_free_byte = PADDR(boot_alloc(0)); /* kva to pa(kernel virtual address to physical address */
+  first_free_page = first_free_byte/PGSIZE;
+
+  // mark kernel and page directory
+  for (i = EXTPHYSMEM/PGSIZE; i < first_free_page; i++) {
+    pages[i].pp_ref = 1;
+  }
+
+  // mark others as free
+	for (i = first_free_page; i < npages; i++) {
 		pages[i].pp_ref = 0;
 		pages[i].pp_link = page_free_list;
 		page_free_list = &pages[i];
@@ -298,10 +320,9 @@ page_alloc(int alloc_flags)
 
   // need clear?
   if (alloc_flags & ALLOC_ZERO)
-    memset(page2kva(pp), 0, PGSIZE);  /* memset take virtual address as parameter ??? */
+    memset(page2kva(pp), '\0', PGSIZE);  /* memset take virtual address as parameter ??? */
 
   return pp;
-	//return 0;
 }
 
 //
@@ -316,6 +337,8 @@ page_free(struct PageInfo *pp)
 	// pp->pp_link is not NULL.
   if (pp->pp_ref != 0) 
     panic("pp->pp_ref should be 0.\n");
+
+  // already in page free list
   if (pp->pp_link != NULL)
     panic("free a frame twice.\n");
 
