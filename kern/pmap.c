@@ -102,9 +102,8 @@ boot_alloc(uint32_t n)
 	nextfree = ROUNDUP(nextfree + n, PGSIZE);
 
   // how can I tell when out of space
-  if ((uint32_t)nextfree >= npages*PGSIZE)
-    panic("boot alloc failed, out of memory");
-
+  //if ((uint32_t)nextfree >= npages*PGSIZE)
+    //panic("boot alloc failed, out of memory"); 
 	return result;
 }
 
@@ -237,12 +236,11 @@ mem_init(void)
 //
 void
 page_init(void)
-{
-	// The example code here marks all physical pages as free.
-	// However this is not truly the case.  What memory is free?
-	//  1) Mark physical page 0 as in use.
-	//     This way we preserve the real-mode IDT and BIOS structures
-	//     in case we ever need them.  (Currently we don't, but...)
+{ // The example code here marks all physical pages as free.  
+  // However this is not truly the case.  What memory is free?  
+  //  1) Mark physical page 0 as in use.  
+  //     This way we preserve the real-mode IDT and BIOS structures 
+  //     in case we ever need them.  (Currently we don't, but...)
 	//  2) The rest of base memory, [PGSIZE, npages_basemem * PGSIZE)
 	//     is free.
 	//  3) Then comes the IO hole [IOPHYSMEM, EXTPHYSMEM), which must
@@ -257,6 +255,11 @@ page_init(void)
 	// free pages!
 	size_t i;
 	for (i = 0; i < npages; i++) {
+    if (i == 0 || ((i >= PGNUM(IOPHYSMEM) && 
+        i <= PGNUM(end - KERNBASE + PGSIZE + n * sizeof(struct PageInfo))))) {
+      pages[i].pp_ref = 1;
+      pages[i].pp_link = NULL;
+    }
 		pages[i].pp_ref = 0;
 		pages[i].pp_link = page_free_list;
 		page_free_list = &pages[i];
@@ -281,7 +284,7 @@ page_alloc(int alloc_flags)
 	// Fill this function in
   // Step 1: take the address of the first page frame as `pp`
   // Step 2: move page_free_list to next
-  // Step 3: clear `pp`
+  // Step 3: clear `pp` by using virtual address
   // Step 5: return pp
   struct PageInfo *pp = NULL;
   
@@ -292,9 +295,11 @@ page_alloc(int alloc_flags)
   pp = page_free_list;
   page_free_list = page_free_list->pp_link;
   pp->pp_link = NULL;
+
   // need clear?
   if (alloc_flags & ALLOC_ZERO)
     memset(page2kva(pp), 0, PGSIZE);  /* memset take virtual address as parameter ??? */
+
   return pp;
 	//return 0;
 }
@@ -309,8 +314,10 @@ page_free(struct PageInfo *pp)
 	// Fill this function in
 	// Hint: You may want to panic if pp->pp_ref is nonzero or
 	// pp->pp_link is not NULL.
-  if (pp->pp_ref != 0 || pp->pp_link != NULL)
+  if (pp->pp_ref != 0) 
     panic("pp->pp_ref should be 0.\n");
+  if (pp->pp_link != NULL)
+    panic("free a frame twice.\n");
 
   // Insert to the head of page_free_list.
   pp->pp_link = page_free_list;
