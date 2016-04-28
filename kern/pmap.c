@@ -98,8 +98,13 @@ boot_alloc(uint32_t n)
 	// to a multiple of PGSIZE.
 	//
 	// LAB 2: Your code here.
+  // Step 1: round up `nextfree`, and save to result
+  // Step 2: increase `nextfree` to next place
+  result = NULL;
+  result = ROUNDUP(nextfree, PGSIZE);
+  next_free = (char *)result + n; 
 
-	return NULL;
+	return result;
 }
 
 // Set up a two-level page table:
