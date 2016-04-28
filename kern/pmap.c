@@ -102,7 +102,7 @@ boot_alloc(uint32_t n)
   // Step 2: increase `nextfree` to next place
   result = NULL;
   result = ROUNDUP(nextfree, PGSIZE);
-  next_free = (char *)result + n; 
+  nextfree = (char *)result + n; 
 
 	return result;
 }
@@ -126,11 +126,11 @@ mem_init(void)
 	i386_detect_memory();
 
 	// Remove this line when you're ready to test this function.
-	panic("mem_init: This function is not finished\n");
+	//panic("mem_init: This function is not finished\n");
 
 	//////////////////////////////////////////////////////////////////////
 	// create initial page directory.
-	kern_pgdir = (pde_t *) boot_alloc(PGSIZE);
+	kern_pgdir = (pde_t *) boot_alloc(PGSIZE); /* kern_pgdir is virtual */
 	memset(kern_pgdir, 0, PGSIZE);
 
 	//////////////////////////////////////////////////////////////////////
