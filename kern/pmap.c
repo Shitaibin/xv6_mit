@@ -98,11 +98,12 @@ boot_alloc(uint32_t n)
 	// to a multiple of PGSIZE.
 	//
 	// LAB 2: Your code here.
-  // Step 1: round up `nextfree`, and save to result
-  // Step 2: increase `nextfree` to next place
-  result = NULL;
-  result = ROUNDUP(nextfree, PGSIZE);
-  nextfree = (char *)result + n; 
+  result = nextfree;
+	nextfree = ROUNDUP(nextfree + n, PGSIZE);
+
+  // how can I tell when out of space
+  if (nextfree >= npages * PGSIZE)
+    panic("boot alloc failed, out of memory");
 
 	return result;
 }
@@ -150,6 +151,8 @@ mem_init(void)
 	// to initialize all fields of each struct PageInfo to 0.
 	// Your code goes here:
 
+  pages = boot_alloc(npages * sizeof(struct PageInfo));
+  memset(pages, 0, sizeof(pages));
 
 	//////////////////////////////////////////////////////////////////////
 	// Now that we've allocated the initial kernel data structures, we set
@@ -276,7 +279,22 @@ struct PageInfo *
 page_alloc(int alloc_flags)
 {
 	// Fill this function in
-	return 0;
+  // Step 1: take the address of the first page frame as `pp`
+  // Step 2: move page_free_list to next
+  // Step 3: clear `pp`
+  // Step 5: return pp
+  struct PageInfo *pp = NULL, *kvapp = NULL;
+  
+  if (page_free_list == NULL) return NULL;
+
+  pp = page_free_list;
+  page_free_list = page_free_list->pp_link;
+  pp->pp_link = NULL;
+  //kvapp = page2kva(pp);
+  if (alloc_flags & ALLOC_ZERO)
+    memset(pp, 0, sizeof(pp));  /* memset take virtual address as parameter ??? */
+  return pp;
+	//return 0;
 }
 
 //
@@ -289,6 +307,12 @@ page_free(struct PageInfo *pp)
 	// Fill this function in
 	// Hint: You may want to panic if pp->pp_ref is nonzero or
 	// pp->pp_link is not NULL.
+  if (pp->pp_ref != 0 || pp->pp_link != NULL)
+    panic("pp->pp_ref should be 0.\n");
+
+  // Insert to the head of page_free_list.
+  pp->pp_link = page_free_list;
+  page_free_list = pp; 
 }
 
 //
