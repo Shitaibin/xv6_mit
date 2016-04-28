@@ -102,7 +102,7 @@ boot_alloc(uint32_t n)
 	nextfree = ROUNDUP(nextfree + n, PGSIZE);
 
   // how can I tell when out of space
-  if (nextfree >= npages * PGSIZE)
+  if ((uint32_t)nextfree >= npages*PGSIZE)
     panic("boot alloc failed, out of memory");
 
 	return result;
@@ -283,16 +283,18 @@ page_alloc(int alloc_flags)
   // Step 2: move page_free_list to next
   // Step 3: clear `pp`
   // Step 5: return pp
-  struct PageInfo *pp = NULL, *kvapp = NULL;
+  struct PageInfo *pp = NULL;
   
+  // no more page frame to allocate
   if (page_free_list == NULL) return NULL;
 
+  // take the first page frame out
   pp = page_free_list;
   page_free_list = page_free_list->pp_link;
   pp->pp_link = NULL;
-  //kvapp = page2kva(pp);
+  // need clear?
   if (alloc_flags & ALLOC_ZERO)
-    memset(pp, 0, sizeof(pp));  /* memset take virtual address as parameter ??? */
+    memset(page2kva(pp), 0, PGSIZE);  /* memset take virtual address as parameter ??? */
   return pp;
 	//return 0;
 }
