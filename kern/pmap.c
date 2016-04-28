@@ -384,7 +384,29 @@ pte_t *
 pgdir_walk(pde_t *pgdir, const void *va, int create)
 {
 	// Fill this function in
-	return NULL;
+  pde_t *pde = NULL;
+  pte_t *pgtable = NULL;
+
+  struct PageInfo *pp;
+
+  pde = &pgdir[PDX(va)];
+  // weather paga frame is exist
+  if (pde & PTE_P) 
+    pgtable = (KADDR(PTE_ADDR(*pde)));
+  else {
+    if (!create ||
+        !(pp = page_aloc(ALLOC_ZERO)) ||
+        !(pgtable =(pte_t*)page2kva(pp)))
+      return NULL;
+
+    pp->pp_ref++;
+    // insert page table into page dir
+    // mark as present, writeable, user
+    *pde = PADDR(pgtable) | PTE_P | PTE_W | PTE_U;
+  }
+
+  // return entry in page table
+	return &pgtable[PTX(va)];
 }
 
 //
@@ -402,6 +424,25 @@ static void
 boot_map_region(pde_t *pgdir, uintptr_t va, size_t size, physaddr_t pa, int perm)
 {
 	// Fill this function in
+  pte_t *pte = NULL;
+  int offset = 0;
+
+  ROUNDUP(size, PGSIZE); // page align
+
+  if (size % PGSIZE)
+    panic("size should be aligned.\n");
+
+  for (offset = 0; offset < (size / PGSIZE); offsert++) {
+    pte = pgdir_walk(pgdir, (void*)va, 1);
+    
+    if (!pte)
+      panic("pgdir_walk to get a page frame failed.");
+
+    // mapping pte to pa
+    *pte = PTE_ADDR(pa) | perm | PTE_P;
+    
+    pa += PGSIZE;
+    va += PGSIZE;
 }
 
 //
