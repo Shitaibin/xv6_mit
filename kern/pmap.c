@@ -380,33 +380,37 @@ page_decref(struct PageInfo* pp)
 // Hint 3: look at inc/mmu.h for useful macros that mainipulate page
 // table and page directory entries.
 //
+
+// Give you an virtual address va, return an
+// address of page table entry.
+// If no valid page table, you may need create one.
 pte_t *
 pgdir_walk(pde_t *pgdir, const void *va, int create)
 {
 	// Fill this function in
-  pde_t *pde = NULL;
-  pte_t *pgtable = NULL;
+  pde_t *pde = NULL;  // page directory entry
+  pte_t *pte = NULL;  // page table entry
 
   struct PageInfo *pp;
 
   pde = &pgdir[PDX(va)];
   // weather paga frame is exist
   if (*pde & PTE_P) 
-    pgtable = (KADDR(PTE_ADDR(*pde)));
+    pte = (KADDR(PTE_ADDR(*pde)));
   else {
     if (!create ||
         !(pp = page_alloc(ALLOC_ZERO)) ||
-        !(pgtable =(pte_t*)page2kva(pp)))
+        !(pte =(pte_t*)page2kva(pp)))
       return NULL;
 
     pp->pp_ref++;
     // insert page table into page dir
     // mark as present, writeable, user
-    *pde = PADDR(pgtable) | PTE_P | PTE_W | PTE_U;
+    *pde = PADDR(pte) | PTE_P | PTE_W | PTE_U;
   }
 
   // return entry in page table
-	return &pgtable[PTX(va)];
+	return &pte[PTX(va)];
 }
 
 //
@@ -471,11 +475,39 @@ boot_map_region(pde_t *pgdir, uintptr_t va, size_t size, physaddr_t pa, int perm
 // Hint: The TA solution is implemented using pgdir_walk, page_remove,
 // and page2pa.
 //
+
+// Give you a virtual address(va) and physical page(pp),
+// mapping va to pp.
+// return 0 or ERROR number.
 int
 page_insert(pde_t *pgdir, struct PageInfo *pp, void *va, int perm)
 {
 	// Fill this function in
-	return 0;
+  pte_t* pte = NULL;
+
+  pte = pgdir_walk(pgdir, va, 1);
+
+  if (!pte) return -E_NO_MEM;  // no memory
+
+  if (*pte & PTE_P) {
+    // valid page table entry
+    if (PTE_ADDR(*pte) == page2pa(pp)) {
+      // mapping va to the same pp,
+      // no need to increase reference,
+      // only need to update flags.
+      *pte = page2pa(pp) | perm | PTE_P;
+      return 0;
+    } else {
+      page_remove(pgdir, va);
+    }
+  }
+
+  // set up flags, and make valid
+  *pte = page2pa(pp) | perm | PTE_P;
+
+  pp->pp_ref++;
+  tlb_invalidate(pgdir, va);
+  return 0;
 }
 
 //
@@ -493,7 +525,12 @@ struct PageInfo *
 page_lookup(pde_t *pgdir, void *va, pte_t **pte_store)
 {
 	// Fill this function in
-	return NULL;
+  // You SHOULD know: pte = *pte_store
+  *pte_store = pgdir_walk(pgdir, va, 0); /* not create */
+  
+  if (!(*pte_store)) return NULL;
+
+  return pa2page(PTE_ADDR(**pte_store));
 }
 
 //
@@ -515,6 +552,17 @@ void
 page_remove(pde_t *pgdir, void *va)
 {
 	// Fill this function in
+  pte_t* pte = NULL;
+  struct PageInfo* pp = NULL;
+
+  pte = pgdir_walk(pgdir, va, 0);
+  pp = page_lookup(pgdir, va, &pte);
+  if (!pp) return;
+
+  tlb_invalidate(pgdir, va);
+  
+  *pte = 0; // remove mapping virtual address to physical address
+  page_decref(pp);
 }
 
 //
