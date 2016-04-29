@@ -391,11 +391,11 @@ pgdir_walk(pde_t *pgdir, const void *va, int create)
 
   pde = &pgdir[PDX(va)];
   // weather paga frame is exist
-  if (pde & PTE_P) 
+  if (*pde & PTE_P) 
     pgtable = (KADDR(PTE_ADDR(*pde)));
   else {
     if (!create ||
-        !(pp = page_aloc(ALLOC_ZERO)) ||
+        !(pp = page_alloc(ALLOC_ZERO)) ||
         !(pgtable =(pte_t*)page2kva(pp)))
       return NULL;
 
@@ -424,7 +424,7 @@ static void
 boot_map_region(pde_t *pgdir, uintptr_t va, size_t size, physaddr_t pa, int perm)
 {
 	// Fill this function in
-  pte_t *pte = NULL;
+  pte_t *pte = NULL;  // page table entry
   int offset = 0;
 
   ROUNDUP(size, PGSIZE); // page align
@@ -432,7 +432,7 @@ boot_map_region(pde_t *pgdir, uintptr_t va, size_t size, physaddr_t pa, int perm
   if (size % PGSIZE)
     panic("size should be aligned.\n");
 
-  for (offset = 0; offset < (size / PGSIZE); offsert++) {
+  for (offset = 0; offset < (size / PGSIZE); offset++) {
     pte = pgdir_walk(pgdir, (void*)va, 1);
     
     if (!pte)
@@ -443,6 +443,7 @@ boot_map_region(pde_t *pgdir, uintptr_t va, size_t size, physaddr_t pa, int perm
     
     pa += PGSIZE;
     va += PGSIZE;
+  }
 }
 
 //
