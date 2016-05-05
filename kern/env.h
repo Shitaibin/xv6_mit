@@ -3,6 +3,7 @@
 #ifndef JOS_KERN_ENV_H
 #define JOS_KERN_ENV_H
 
+/* Aha, include user environment */
 #include <inc/env.h>
 
 extern struct Env *envs;		// All environments
