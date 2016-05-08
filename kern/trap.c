@@ -59,6 +59,7 @@ static const char *trapname(int trapno)
 }
 
 
+// Initialize IDT
 void
 trap_init(void)
 {
@@ -82,7 +83,8 @@ trap_init(void)
   void th16();
   SETGATE(idt[0], 0, GD_KT, th0, 0);
   SETGATE(idt[1], 0, GD_KT, th1, 0);
-  SETGATE(idt[3], 0, GD_KT, th3, 0);
+  // modify dpl of T_BRKPT to allow users to invoke breakpoint exception
+  SETGATE(idt[3], 0, GD_KT, th3, 3); 
   SETGATE(idt[4], 0, GD_KT, th4, 0);
   SETGATE(idt[5], 0, GD_KT, th5, 0);
   SETGATE(idt[6], 0, GD_KT, th6, 0);
@@ -175,6 +177,10 @@ trap_dispatch(struct Trapframe *tf)
 	// LAB 3: Your code here.
   if (tf->tf_trapno == T_PGFLT) {
     page_fault_handler(tf);
+    return;
+  }
+  if (tf->tf_trapno == T_BRKPT) {
+    monitor(tf); // Active monitor, optionally showing trap information
     return;
   }
 
