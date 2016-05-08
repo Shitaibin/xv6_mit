@@ -21,6 +21,10 @@ sys_cputs(const char *s, size_t len)
 	// Destroy the environment if not.
 
 	// LAB 3: Your code here.
+  //static int enter_times = 0;
+  //cprintf("This is the %d times enter sys_cputs\n", ++enter_times);
+
+  user_mem_assert(curenv, s, len, PTE_U);
 
 	// Print the string supplied by the user.
 	cprintf("%.*s", len, s);

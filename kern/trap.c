@@ -241,6 +241,8 @@ trap(struct Trapframe *tf)
 	trap_dispatch(tf);
 
 	// Return to the current environment, which should be running.
+  // If not running, must be detoryed or something.
+  // Should not recover it.
 	assert(curenv && curenv->env_status == ENV_RUNNING);
 	env_run(curenv);
 }
@@ -257,6 +259,8 @@ page_fault_handler(struct Trapframe *tf)
 	// Handle kernel-mode page faults.
 
 	// LAB 3: Your code here.
+  if ((tf->tf_cs & 3) == 0)
+    panic("Kernel page fault!");
 
 	// We've already handled kernel-mode exceptions, so if we get here,
 	// the page fault happened in user mode.
