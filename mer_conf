@@ -1,0 +1,863 @@
+diff --git a/.gitignore b/.gitignore
+index 896083a..5b62360 100644
+--- a/.gitignore
++++ b/.gitignore
+@@ -15,4 +15,8 @@
+ /lab?/
+ /sol?/
+ /myapi.key
++<<<<<<< HEAD
++*.swp
++=======
+ .suf
++>>>>>>> a19db410a9d5b87106ca4c22c48029be1ea7fa61
+diff --git a/boot/Makefrag b/boot/Makefrag
+index a2f49f8..25d40e8 100644
+--- a/boot/Makefrag
++++ b/boot/Makefrag
+@@ -25,6 +25,7 @@ $(OBJDIR)/boot/main.o: boot/main.c
+ 
+ $(OBJDIR)/boot/boot: $(BOOT_OBJS)
+ 	@echo + ld boot/boot
++  # BIOS loads the boot sector into memory starting at address 0x7c00
+ 	$(V)$(LD) $(LDFLAGS) -N -e start -Ttext 0x7C00 -o $@.out $^
+ 	$(V)$(OBJDUMP) -S $@.out >$@.asm
+ 	$(V)$(OBJCOPY) -S -O binary -j .text $@.out $@
+diff --git a/kern/env.c b/kern/env.c
+index 78abe7e..1887642 100644
+--- a/kern/env.c
++++ b/kern/env.c
+@@ -119,6 +119,18 @@ env_init(void)
+ {
+ 	// Set up envs array
+ 	// LAB 3: Your code here.
++  int i;
++  for (i = NENV - 1; i >= 0; i--) {
++  //for (i = 0; i < NENV; i++) {
++    envs[i].env_id = 0;
++    envs[i].env_parent_id = 0;
++    envs[i].env_type = ENV_TYPE_USER;
++    envs[i].env_status = 0;
++    envs[i].env_runs = 0;
++    envs[i].env_pgdir = NULL;
++    envs[i].env_link = env_free_list;
++    env_free_list = (envs + i);
++  }
+ 
+ 	// Per-CPU part of the initialization
+ 	env_init_percpu();
+@@ -182,6 +194,9 @@ env_setup_vm(struct Env *e)
+ 	//    - The functions in kern/pmap.h are handy.
+ 
+ 	// LAB 3: Your code here.
++  p->pp_ref++;  // add reference count
++  e->env_pgdir = (pde_t*) page2kva(p);
++  memcpy(e->env_pgdir, kern_pgdir, PGSIZE); // key
+ 
+ 	// UVPT maps the env's own page table read-only.
+ 	// Permissions: kernel R, user R
+@@ -205,6 +220,7 @@ env_alloc(struct Env **newenv_store, envid_t parent_id)
+ 	int r;
+ 	struct Env *e;
+ 
++  // get an Env struct from env_free_list
+ 	if (!(e = env_free_list))
+ 		return -E_NO_FREE_ENV;
+ 
+@@ -279,6 +295,19 @@ region_alloc(struct Env *e, void *va, size_t len)
+ 	//   'va' and 'len' values that are not page-aligned.
+ 	//   You should round va down, and round (va + len) up.
+ 	//   (Watch out for corner-cases!)
++  void *begin = ROUNDDOWN(va, PGSIZE);  // the first page's virtual address
++  void *end = ROUNDUP(va + len, PGSIZE);// the last page's
++  struct PageInfo* pp = NULL;
++  for (; begin < end; begin += PGSIZE) {
++    if (!(pp = page_alloc(0))) {
++      // alloc a physical page
++      panic("region_alloc failed.");
++    }
++    if (page_insert(e->env_pgdir, pp, begin, PTE_W | PTE_U) != 0) {
++      // map begin to pp at table env_pgdir
++      panic("regin_alloc failed.");
++    }
++  }
+ }
+ 
+ //
+@@ -335,11 +364,38 @@ load_icode(struct Env *e, uint8_t *binary)
+ 	//  What?  (See env_run() and env_pop_tf() below.)
+ 
+ 	// LAB 3: Your code here.
++  struct Elf *elf_header = (struct Elf*) binary;
++  struct Proghdr *ph, *eph;
++
++  if (elf_header->e_magic != ELF_MAGIC)
++    panic("Not valid ELF binary.");
++
++  ph = (struct Proghdr *) ((uint8_t*)elf_header + elf_header->e_phoff);
++  eph = ph + elf_header->e_phnum;
++
++  // above is copy from main.c
++
++  // switch to user mode
++  lcr3(PADDR(e->env_pgdir));
++
++  // alloc pages and copy codes to there
++  for (; ph < eph; ph++)
++    if (ph->p_type == ELF_PROG_LOAD) {
++      region_alloc(e, (void *)ph->p_va, ph->p_memsz);
++      memset((void*)ph->p_va, 0, ph->p_memsz);
++      memcpy((void*)ph->p_va, binary+ph->p_offset, ph->p_filesz);
++    }
++
++  // switch to kernel mode
++  lcr3(PADDR(kern_pgdir));
++  // set eip
++  e->env_tf.tf_eip = elf_header->e_entry;
+ 
+ 	// Now map one page for the program's initial stack
+ 	// at virtual address USTACKTOP - PGSIZE.
+ 
+ 	// LAB 3: Your code here.
++  region_alloc(e, (void*)(USTACKTOP - PGSIZE), PGSIZE);
+ }
+ 
+ //
+@@ -353,6 +409,14 @@ void
+ env_create(uint8_t *binary, enum EnvType type)
+ {
+ 	// LAB 3: Your code here.
++  struct Env *e;
++  int ret = 0;
++
++  if ((ret = env_alloc(&e, 0)) < 0) 
++    panic("env_create: %e\n", ret);
++
++  load_icode(e, binary);
++  e->env_type = type;
+ }
+ 
+ //
+@@ -482,7 +546,21 @@ env_run(struct Env *e)
+ 	//	e->env_tf to sensible values.
+ 
+ 	// LAB 3: Your code here.
+-
+-	panic("env_run not yet implemented");
++  if (curenv && curenv->env_status == ENV_RUNNING) {
++    // Change curenv state
++    curenv->env_status = ENV_RUNNABLE;
++  }
++  // Set curenv to new
++  curenv = e;
++  e->env_status = ENV_RUNNING;
++  e->env_runs++;
++
++
++  // switch address space
++  lcr3(PADDR(curenv->env_pgdir));
++  // restore and drop into user mode
++
++  env_pop_tf(&(e->env_tf));
++  panic("env_run not yet implemented");
+ }
+ 
+diff --git a/kern/env.h b/kern/env.h
+index 286ece7..3366271 100644
+--- a/kern/env.h
++++ b/kern/env.h
+@@ -3,6 +3,7 @@
+ #ifndef JOS_KERN_ENV_H
+ #define JOS_KERN_ENV_H
+ 
++/* Aha, include user environment */
+ #include <inc/env.h>
+ #include <kern/cpu.h>
+ 
+diff --git a/kern/kdebug.c b/kern/kdebug.c
+index f4ee8ee..7ba2c9c 100644
+--- a/kern/kdebug.c
++++ b/kern/kdebug.c
+@@ -142,6 +142,8 @@ debuginfo_eip(uintptr_t addr, struct Eipdebuginfo *info)
+ 		// Make sure this memory is valid.
+ 		// Return -1 if it is not.  Hint: Call user_mem_check.
+ 		// LAB 3: Your code here.
++    if (user_mem_check(curenv, usd, sizeof(struct UserStabData), PTE_U))
++      return -1;
+ 
+ 		stabs = usd->stabs;
+ 		stab_end = usd->stab_end;
+@@ -150,6 +152,11 @@ debuginfo_eip(uintptr_t addr, struct Eipdebuginfo *info)
+ 
+ 		// Make sure the STABS and string table memory is valid.
+ 		// LAB 3: Your code here.
++    if (user_mem_check(curenv, usd, sizeof(struct Stab), PTE_U))
++      return -1;
++    if (user_mem_check(curenv, usd, (stabstr_end-stabstr), PTE_U))
++      return -1;
++
+ 	}
+ 
+ 	// String table validity checks
+@@ -204,7 +211,13 @@ debuginfo_eip(uintptr_t addr, struct Eipdebuginfo *info)
+ 	//	Look at the STABS documentation and <inc/stab.h> to find
+ 	//	which one.
+ 	// Your code here.
++  stab_binsearch(stabs, &lline, &rline, N_SLINE, addr);
+ 
++  if (lline <= rline) {
++    info->eip_line = stabs[lline].n_desc;
++  } else {
++    return -1;
++  }
+ 
+ 	// Search backwards from the line number for the relevant filename
+ 	// stab.
+diff --git a/kern/monitor.c b/kern/monitor.c
+index f2aa03f..224c09a 100644
+--- a/kern/monitor.c
++++ b/kern/monitor.c
+@@ -25,6 +25,7 @@ struct Command {
+ static struct Command commands[] = {
+ 	{ "help", "Display this list of commands", mon_help },
+ 	{ "kerninfo", "Display information about the kernel", mon_kerninfo },
++  { "backtrace", "DisPlay information about the backtrace", mon_backtrace },
+ };
+ #define NCOMMANDS (sizeof(commands)/sizeof(commands[0]))
+ 
+@@ -60,6 +61,44 @@ int
+ mon_backtrace(int argc, char **argv, struct Trapframe *tf)
+ {
+ 	// Your code here.
++  // cprintf("Wow, this is the backtrace routine.\n");
++  uint32_t *ebp, *eip;
++  uint32_t arg0, arg1, arg2, arg3, arg4;
++  struct Eipdebuginfo eip_debug_info_obj;
++  struct Eipdebuginfo *info;
++  char eip_fn_name[30];
++  
++  info = &eip_debug_info_obj;
++
++  ebp = (uint32_t *)read_ebp();
++  eip = (uint32_t *)ebp[1];   /* in backtrace eip point to where return */
++  arg0 = ebp[2];
++  arg1 = ebp[3];
++  arg2 = ebp[4];
++  arg3 = ebp[5];
++  arg4 = ebp[6];
++  debuginfo_eip((uintptr_t)eip, info);
++  memcpy(eip_fn_name, info->eip_fn_name, info->eip_fn_namelen);
++  eip_fn_name[info->eip_fn_namelen] = 0;
++
++  cprintf("Stack backtrace:\n");
++  while (ebp != 0) {  /* the .... */
++    cprintf("  ebp %08x  eip %08x  args %08x %08x %08x %08x %08x\n",
++        ebp, eip, arg0, arg1, arg2, arg3, arg4);
++    cprintf("         %s:%d: %s+%d\n", info->eip_file, info->eip_line,
++        eip_fn_name, (int)((uintptr_t)eip - info->eip_fn_addr));
++    ebp = (uint32_t *)ebp[0];
++    eip = (uint32_t *)ebp[1];   /* in backtrace eip point to where return */
++    arg0 = ebp[2];
++    arg1 = ebp[3];
++    arg2 = ebp[4];
++    arg3 = ebp[5];
++    arg4 = ebp[6];
++    
++    debuginfo_eip((uintptr_t)eip, info);
++    memcpy(eip_fn_name, info->eip_fn_name, info->eip_fn_namelen);
++    eip_fn_name[info->eip_fn_namelen] = 0;
++  }
+ 	return 0;
+ }
+ 
+diff --git a/kern/pmap.c b/kern/pmap.c
+index df94775..2c28c34 100644
+--- a/kern/pmap.c
++++ b/kern/pmap.c
+@@ -101,8 +101,13 @@ boot_alloc(uint32_t n)
+ 	// to a multiple of PGSIZE.
+ 	//
+ 	// LAB 2: Your code here.
++  result = nextfree;
++	nextfree = ROUNDUP(nextfree + n, PGSIZE);
+ 
+-	return NULL;
++  // how can I tell when out of space
++  //if ((uint32_t)nextfree >= npages*PGSIZE)
++    //panic("boot alloc failed, out of memory"); 
++	return result;
+ }
+ 
+ // Set up a two-level page table:
+@@ -124,11 +129,11 @@ mem_init(void)
+ 	i386_detect_memory();
+ 
+ 	// Remove this line when you're ready to test this function.
+-	panic("mem_init: This function is not finished\n");
++	//panic("mem_init: This function is not finished\n");
+ 
+ 	//////////////////////////////////////////////////////////////////////
+ 	// create initial page directory.
+-	kern_pgdir = (pde_t *) boot_alloc(PGSIZE);
++	kern_pgdir = (pde_t *) boot_alloc(PGSIZE); /* kern_pgdir is virtual */
+ 	memset(kern_pgdir, 0, PGSIZE);
+ 
+ 	//////////////////////////////////////////////////////////////////////
+@@ -148,10 +153,14 @@ mem_init(void)
+ 	// to initialize all fields of each struct PageInfo to 0.
+ 	// Your code goes here:
+ 
++  pages = boot_alloc(npages * sizeof(struct PageInfo));
++  memset(pages, 0, npages * sizeof(struct PageInfo));
+ 
+ 	//////////////////////////////////////////////////////////////////////
+ 	// Make 'envs' point to an array of size 'NENV' of 'struct Env'.
+ 	// LAB 3: Your code here.
++  envs = (struct Env*)boot_alloc(NENV * sizeof(struct Env));
++  memset(envs, 0, NENV * sizeof(struct Env));
+ 
+ 	//////////////////////////////////////////////////////////////////////
+ 	// Now that we've allocated the initial kernel data structures, we set
+@@ -175,6 +184,11 @@ mem_init(void)
+ 	//      (ie. perm = PTE_U | PTE_P)
+ 	//    - pages itself -- kernel RW, user NONE
+ 	// Your code goes here:
++  boot_map_region(kern_pgdir,
++                  UPAGES,
++                  ROUNDUP((sizeof(struct PageInfo) * npages), PGSIZE),
++                  PADDR(pages),
++                  (PTE_U | PTE_P));
+ 
+ 	//////////////////////////////////////////////////////////////////////
+ 	// Map the 'envs' array read-only by the user at linear address UENVS
+@@ -183,6 +197,11 @@ mem_init(void)
+ 	//    - the new image at UENVS  -- kernel R, user R
+ 	//    - envs itself -- kernel RW, user NONE
+ 	// LAB 3: Your code here.
++  boot_map_region(kern_pgdir,
++                  UENVS,
++                  ROUNDUP(NENV * sizeof(struct Env), PGSIZE),
++                  PADDR(envs),
++                  (PTE_U | PTE_P));
+ 
+ 	//////////////////////////////////////////////////////////////////////
+ 	// Use the physical memory that 'bootstack' refers to as the kernel
+@@ -195,6 +214,11 @@ mem_init(void)
+ 	//       overwrite memory.  Known as a "guard page".
+ 	//     Permissions: kernel RW, user NONE
+ 	// Your code goes here:
++  boot_map_region(kern_pgdir,
++                  (KSTACKTOP - KSTKSIZE),
++                  KSTKSIZE,
++                  PADDR(bootstack),
++                  (PTE_W | PTE_P));
+ 
+ 	//////////////////////////////////////////////////////////////////////
+ 	// Map all of physical memory at KERNBASE.
+@@ -204,6 +228,11 @@ mem_init(void)
+ 	// we just set up the mapping anyway.
+ 	// Permissions: kernel RW, user NONE
+ 	// Your code goes here:
++  boot_map_region(kern_pgdir,
++                  KERNBASE,
++                  ROUNDUP((0xFFFFFFFF - KERNBASE), PGSIZE),
++                  0,
++                  (PTE_W | PTE_P));
+ 
+ 	// Initialize the SMP-related parts of the memory map
+ 	mem_init_mp();
+@@ -272,6 +301,13 @@ mem_init_mp(void)
+ //
+ void
+ page_init(void)
++<<<<<<< HEAD
++{ // The example code here marks all physical pages as free.  
++  // However this is not truly the case.  What memory is free?  
++  //  1) Mark physical page 0 as in use.  
++  //     This way we preserve the real-mode IDT and BIOS structures 
++  //     in case we ever need them.  (Currently we don't, but...)
++=======
+ {
+ 	// LAB 4:
+ 	// Change your code to mark the physical page at MPENTRY_PADDR
+@@ -282,6 +318,7 @@ page_init(void)
+ 	//  1) Mark physical page 0 as in use.
+ 	//     This way we preserve the real-mode IDT and BIOS structures
+ 	//     in case we ever need them.  (Currently we don't, but...)
++>>>>>>> a19db410a9d5b87106ca4c22c48029be1ea7fa61
+ 	//  2) The rest of base memory, [PGSIZE, npages_basemem * PGSIZE)
+ 	//     is free.
+ 	//  3) Then comes the IO hole [IOPHYSMEM, EXTPHYSMEM), which must
+@@ -295,7 +332,34 @@ page_init(void)
+ 	// NB: DO NOT actually touch the physical memory corresponding to
+ 	// free pages!
+ 	size_t i;
+-	for (i = 0; i < npages; i++) {
++  size_t first_free_byte, first_free_page;
++  
++  // 1)
++  pages[0].pp_ref = 1;
++
++  // 2)
++  for (i = 1; i < npages_basemem; i++) {
++    pages[i].pp_ref = 0;
++    pages[i].pp_link = page_free_list;
++    page_free_list = &pages[i];
++  }
++
++  // 3)
++  for (i = IOPHYSMEM/PGSIZE; i < EXTPHYSMEM/PGSIZE; i++) {
++    pages[i].pp_ref = 1;
++  }
++
++  // 4
++  first_free_byte = PADDR(boot_alloc(0)); /* kva to pa(kernel virtual address to physical address */
++  first_free_page = first_free_byte/PGSIZE;
++
++  // mark kernel and page directory
++  for (i = EXTPHYSMEM/PGSIZE; i < first_free_page; i++) {
++    pages[i].pp_ref = 1;
++  }
++
++  // mark others as free
++	for (i = first_free_page; i < npages; i++) {
+ 		pages[i].pp_ref = 0;
+ 		pages[i].pp_link = page_free_list;
+ 		page_free_list = &pages[i];
+@@ -318,7 +382,25 @@ struct PageInfo *
+ page_alloc(int alloc_flags)
+ {
+ 	// Fill this function in
+-	return 0;
++  // Step 1: take the address of the first page frame as `pp`
++  // Step 2: move page_free_list to next
++  // Step 3: clear `pp` by using virtual address
++  // Step 5: return pp
++  struct PageInfo *pp = NULL;
++  
++  // no more page frame to allocate
++  if (page_free_list == NULL) return NULL;
++
++  // take the first page frame out
++  pp = page_free_list;
++  page_free_list = page_free_list->pp_link;
++  pp->pp_link = NULL;
++
++  // need clear?
++  if (alloc_flags & ALLOC_ZERO)
++    memset(page2kva(pp), '\0', PGSIZE);  /* memset take virtual address as parameter ??? */
++
++  return pp;
+ }
+ 
+ //
+@@ -331,6 +413,16 @@ page_free(struct PageInfo *pp)
+ 	// Fill this function in
+ 	// Hint: You may want to panic if pp->pp_ref is nonzero or
+ 	// pp->pp_link is not NULL.
++  if (pp->pp_ref != 0) 
++    panic("pp->pp_ref should be 0.\n");
++
++  // already in page free list
++  if (pp->pp_link != NULL)
++    panic("free a frame twice.\n");
++
++  // Insert to the head of page_free_list.
++  pp->pp_link = page_free_list;
++  page_free_list = pp; 
+ }
+ 
+ //
+@@ -366,11 +458,37 @@ page_decref(struct PageInfo* pp)
+ // Hint 3: look at inc/mmu.h for useful macros that mainipulate page
+ // table and page directory entries.
+ //
++
++// Give you an virtual address va, return an
++// address of page table entry.
++// If no valid page table, you may need create one.
+ pte_t *
+ pgdir_walk(pde_t *pgdir, const void *va, int create)
+ {
+ 	// Fill this function in
+-	return NULL;
++  pde_t *pde = NULL;  // page directory entry
++  pte_t *pte = NULL;  // page table entry
++
++  struct PageInfo *pp;
++
++  pde = &pgdir[PDX(va)];
++  // weather paga frame is exist
++  if (*pde & PTE_P) 
++    pte = (KADDR(PTE_ADDR(*pde)));
++  else {
++    if (!create ||
++        !(pp = page_alloc(ALLOC_ZERO)) ||
++        !(pte =(pte_t*)page2kva(pp)))
++      return NULL;
++
++    pp->pp_ref++;
++    // insert page table into page dir
++    // mark as present, writeable, user
++    *pde = PADDR(pte) | PTE_P | PTE_W | PTE_U;
++  }
++
++  // return entry in page table
++	return &pte[PTX(va)];
+ }
+ 
+ //
+@@ -388,6 +506,26 @@ static void
+ boot_map_region(pde_t *pgdir, uintptr_t va, size_t size, physaddr_t pa, int perm)
+ {
+ 	// Fill this function in
++  pte_t *pte = NULL;  // page table entry
++  int offset = 0;
++
++  ROUNDUP(size, PGSIZE); // page align
++
++  if (size % PGSIZE)
++    panic("size should be aligned.\n");
++
++  for (offset = 0; offset < (size / PGSIZE); offset++) {
++    pte = pgdir_walk(pgdir, (void*)va, 1);
++    
++    if (!pte)
++      panic("pgdir_walk to get a page frame failed.");
++
++    // mapping pte to pa
++    *pte = PTE_ADDR(pa) | perm | PTE_P;
++    
++    pa += PGSIZE;
++    va += PGSIZE;
++  }
+ }
+ 
+ //
+@@ -415,11 +553,39 @@ boot_map_region(pde_t *pgdir, uintptr_t va, size_t size, physaddr_t pa, int perm
+ // Hint: The TA solution is implemented using pgdir_walk, page_remove,
+ // and page2pa.
+ //
++
++// Give you a virtual address(va) and physical page(pp),
++// mapping va to pp.
++// return 0 or ERROR number.
+ int
+ page_insert(pde_t *pgdir, struct PageInfo *pp, void *va, int perm)
+ {
+ 	// Fill this function in
+-	return 0;
++  pte_t* pte = NULL;
++
++  pte = pgdir_walk(pgdir, va, 1);
++
++  if (!pte) return -E_NO_MEM;  // no memory
++
++  if (*pte & PTE_P) {
++    // valid page table entry
++    if (PTE_ADDR(*pte) == page2pa(pp)) {
++      // mapping va to the same pp,
++      // no need to increase reference,
++      // only need to update flags.
++      *pte = page2pa(pp) | perm | PTE_P;
++      return 0;
++    } else {
++      page_remove(pgdir, va);
++    }
++  }
++
++  // set up flags, and make valid
++  *pte = page2pa(pp) | perm | PTE_P;
++
++  pp->pp_ref++;
++  tlb_invalidate(pgdir, va);
++  return 0;
+ }
+ 
+ //
+@@ -437,7 +603,12 @@ struct PageInfo *
+ page_lookup(pde_t *pgdir, void *va, pte_t **pte_store)
+ {
+ 	// Fill this function in
+-	return NULL;
++  // You SHOULD know: pte = *pte_store
++  *pte_store = pgdir_walk(pgdir, va, 0); /* not create */
++  
++  if (!(*pte_store)) return NULL;
++
++  return pa2page(PTE_ADDR(**pte_store));
+ }
+ 
+ //
+@@ -459,6 +630,17 @@ void
+ page_remove(pde_t *pgdir, void *va)
+ {
+ 	// Fill this function in
++  pte_t* pte = NULL;
++  struct PageInfo* pp = NULL;
++
++  pte = pgdir_walk(pgdir, va, 0);
++  pp = page_lookup(pgdir, va, &pte);
++  if (!pp) return;
++
++  tlb_invalidate(pgdir, va);
++  
++  *pte = 0; // remove mapping virtual address to physical address
++  page_decref(pp);
+ }
+ 
+ //
+@@ -532,7 +714,18 @@ int
+ user_mem_check(struct Env *env, const void *va, size_t len, int perm)
+ {
+ 	// LAB 3: Your code here.
+-
++  cprintf("debug: user_mem_check va: %x, len: %x\n", va, len);
++  uint32_t begin = (uint32_t) ROUNDDOWN(va, PGSIZE);
++  uint32_t end = (uint32_t) ROUNDUP(va+len-1, PGSIZE);
++  uint32_t i;
++  for (i = begin; i < end; i+=PGSIZE) {
++    pte_t *pte = pgdir_walk(env->env_pgdir, (void*)i, 0);
++    if ((i>=ULIM || !pte || !(*pte & PTE_P) || ((*pte & perm) != perm))) {
++        user_mem_check_addr = (i < (uint32_t)va ? (uint32_t) va : i);
++        return -E_FAULT;
++    }
++  }
++  cprintf("debug: user_mem_check success va: %x, len: %x\n", va, len);
+ 	return 0;
+ }
+ 
+diff --git a/kern/syscall.c b/kern/syscall.c
+index e7d00b1..9667ef5 100644
+--- a/kern/syscall.c
++++ b/kern/syscall.c
+@@ -22,6 +22,10 @@ sys_cputs(const char *s, size_t len)
+ 	// Destroy the environment if not.
+ 
+ 	// LAB 3: Your code here.
++  //static int enter_times = 0;
++  //cprintf("This is the %d times enter sys_cputs\n", ++enter_times);
++
++  user_mem_assert(curenv, s, len, PTE_U);
+ 
+ 	// Print the string supplied by the user.
+ 	cprintf("%.*s", len, s);
+@@ -271,11 +275,27 @@ syscall(uint32_t syscallno, uint32_t a1, uint32_t a2, uint32_t a3, uint32_t a4,
+ 	// Return any appropriate return value.
+ 	// LAB 3: Your code here.
+ 
+-	panic("syscall not implemented");
++	//panic("syscall not implemented");
+ 
++  int ret = 0;
+ 	switch (syscallno) {
++    case SYS_cputs:
++      sys_cputs((char*)a1, a2);
++      ret = 0;
++      break;
++    case SYS_cgetc:
++      ret = sys_cgetc();
++      break;
++    case SYS_getenvid:
++      ret = sys_getenvid();
++      break;
++    case SYS_env_destroy:
++      sys_env_destroy(a1);
++      ret = 0;
++      break;
+ 	default:
+-		return -E_NO_SYS;
++      ret = -E_NO_SYS;
+ 	}
++  return ret;
+ }
+ 
+diff --git a/kern/trap.c b/kern/trap.c
+index 96d65f8..5aee45f 100644
+--- a/kern/trap.c
++++ b/kern/trap.c
+@@ -66,14 +66,49 @@ static const char *trapname(int trapno)
+ }
+ 
+ 
++// Initialize IDT
+ void
+ trap_init(void)
+ {
+ 	extern struct Segdesc gdt[];
+ 
+ 	// LAB 3: Your code here.
+-
+-	// Per-CPU setup 
++  void th0();
++  void th1();
++  void th3();
++  void th4();
++  void th5();
++  void th6();
++  void th7();
++  void th8();
++  void th9();
++  void th10();
++  void th11();
++  void th12();
++  void th13();
++  void th14();
++  void th16();
++  void th48();
++
++  SETGATE(idt[0], 0, GD_KT, th0, 0);
++  SETGATE(idt[1], 0, GD_KT, th1, 0);
++  // modify dpl of T_BRKPT to allow users to invoke breakpoint exception
++  SETGATE(idt[3], 0, GD_KT, th3, 3); 
++  SETGATE(idt[4], 0, GD_KT, th4, 0);
++  SETGATE(idt[5], 0, GD_KT, th5, 0);
++  SETGATE(idt[6], 0, GD_KT, th6, 0);
++  SETGATE(idt[7], 0, GD_KT, th7, 0);
++  SETGATE(idt[8], 0, GD_KT, th8, 0);
++  SETGATE(idt[9], 0, GD_KT, th9, 0);
++  SETGATE(idt[10], 0, GD_KT, th10, 0);
++  SETGATE(idt[11], 0, GD_KT, th11, 0);
++  SETGATE(idt[12], 0, GD_KT, th12, 0);
++  SETGATE(idt[13], 0, GD_KT, th13, 0);
++  SETGATE(idt[14], 0, GD_KT, th14, 0);
++  SETGATE(idt[16], 0, GD_KT, th16, 0);
++  SETGATE(idt[48], 0, GD_KT, th48, 3); // system call
++
++	//Per-CPU setup 
+ 	trap_init_percpu();
+ }
+ 
+@@ -173,6 +208,24 @@ trap_dispatch(struct Trapframe *tf)
+ {
+ 	// Handle processor exceptions.
+ 	// LAB 3: Your code here.
++  if (tf->tf_trapno == T_PGFLT) {
++    page_fault_handler(tf);
++    return;
++  }
++  if (tf->tf_trapno == T_BRKPT) {
++    monitor(tf); // Active monitor, optionally showing trap information
++    return;
++  }
++  if (tf->tf_trapno == T_SYSCALL) {
++    cprintf("SYSTEM CALL\n");
++    // eax save systemcall number
++    // edx, ecs, ebx, edi, esi are argumnets
++    // return values save into eax
++    tf->tf_regs.reg_eax = 
++      syscall(tf->tf_regs.reg_eax, tf->tf_regs.reg_edx, tf->tf_regs.reg_ecx,
++        tf->tf_regs.reg_ebx, tf->tf_regs.reg_edi, tf->tf_regs.reg_esi);
++    return; 
++  }
+ 
+ 	// Handle spurious interrupts
+ 	// The hardware sometimes raises these because of noise on the
+@@ -247,6 +300,13 @@ trap(struct Trapframe *tf)
+ 	// Dispatch based on what type of trap occurred
+ 	trap_dispatch(tf);
+ 
++<<<<<<< HEAD
++	// Return to the current environment, which should be running.
++  // If not running, must be detoryed or something.
++  // Should not recover it.
++	assert(curenv && curenv->env_status == ENV_RUNNING);
++	env_run(curenv);
++=======
+ 	// If we made it to this point, then no other environment was
+ 	// scheduled, so we should return to the current environment
+ 	// if doing so makes sense.
+@@ -254,6 +314,7 @@ trap(struct Trapframe *tf)
+ 		env_run(curenv);
+ 	else
+ 		sched_yield();
++>>>>>>> a19db410a9d5b87106ca4c22c48029be1ea7fa61
+ }
+ 
+ 
+@@ -268,6 +329,8 @@ page_fault_handler(struct Trapframe *tf)
+ 	// Handle kernel-mode page faults.
+ 
+ 	// LAB 3: Your code here.
++  if ((tf->tf_cs & 3) == 0)
++    panic("Kernel page fault!");
+ 
+ 	// We've already handled kernel-mode exceptions, so if we get here,
+ 	// the page fault happened in user mode.
+diff --git a/kern/trapentry.S b/kern/trapentry.S
+index 2dbeeca..d668698 100644
+--- a/kern/trapentry.S
++++ b/kern/trapentry.S
+@@ -47,10 +47,33 @@
+ /*
+  * Lab 3: Your code here for generating entry points for the different traps.
+  */
+-
++  TRAPHANDLER_NOEC(th0, 0)
++  TRAPHANDLER_NOEC(th1, 1)
++  TRAPHANDLER_NOEC(th3, 3)
++  TRAPHANDLER_NOEC(th4, 4)
++  TRAPHANDLER_NOEC(th5, 5)
++  TRAPHANDLER_NOEC(th6, 6)
++  TRAPHANDLER_NOEC(th7, 7)
++  TRAPHANDLER(th8, 8)
++  TRAPHANDLER_NOEC(th9, 9)
++  TRAPHANDLER(th10, 10)
++  TRAPHANDLER(th11, 11)
++  TRAPHANDLER(th12, 12)
++  TRAPHANDLER(th13, 13)
++  TRAPHANDLER(th14, 14)
++  TRAPHANDLER_NOEC(th16, 16)
++  TRAPHANDLER_NOEC(th48, 48) // system call
+ 
+ 
+ /*
+  * Lab 3: Your code here for _alltraps
+  */
+-
++_alltraps:
++  pushl %ds
++  pushl %es
++  pushal
++  movw $GD_KD, %ax
++  movw %ax, %ds
++  movw %ax, %es
++  pushl %esp
++  call trap
+diff --git a/lib/libmain.c b/lib/libmain.c
+index 8a14b29..ed78614 100644
+--- a/lib/libmain.c
++++ b/lib/libmain.c
+@@ -13,7 +13,9 @@ libmain(int argc, char **argv)
+ {
+ 	// set thisenv to point at our Env structure in envs[].
+ 	// LAB 3: Your code here.
+-	thisenv = 0;
++	//thisenv = 0;
++  thisenv = envs + ENVX(sys_getenvid());
++
+ 
+ 	// save the name of the program so that panic() can use it
+ 	if (argc > 0)
+diff --git a/lib/printfmt.c b/lib/printfmt.c
+index 22e6abe..176fdc6 100644
+--- a/lib/printfmt.c
++++ b/lib/printfmt.c
+@@ -208,10 +208,13 @@ vprintfmt(void (*putch)(int, void*), void *putdat, const char *fmt, va_list ap)
+ 		// (unsigned) octal
+ 		case 'o':
+ 			// Replace this with your code.
+-			putch('X', putdat);
+-			putch('X', putdat);
+-			putch('X', putdat);
+-			break;
++		  num = getint(&ap, lflag);
++      if ((long long) num < 0) {
++        putch('-', putdat);
++        num = -(long long) num;
++      }
++      base = 8;
++      goto number;  
+ 
+ 		// pointer
+ 		case 'p':
