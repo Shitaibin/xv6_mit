@@ -151,9 +151,9 @@ trap_init_percpu(void)
 	//gdt[GD_TSS0 >> 3] = SEG16(STS_T32A, (uint32_t) (&ts),
 	//				sizeof(struct Taskstate) - 1, 0);
 	//gdt[GD_TSS0 >> 3].sd_s = 0;
-	gdt[GD_TSS0 >> 3] = SEG16(STS_T32A, (uint32_t) (&thiscpu->cpu_ts),
-					                  sizeof(struct Taskstate) - 1, 0);
-	gdt[GD_TSS0 >> 3].sd_s = 0;
+	gdt[(GD_TSS0 >> 3) + cid] = SEG16(STS_T32A, (uint32_t) (&(thiscpu->cpu_ts)),
+					                  sizeof(struct Taskstate), 0);
+	gdt[(GD_TSS0 >> 3) + cid].sd_s = 0;
   
 
 	// Load the TSS selector (like other segment selectors, the

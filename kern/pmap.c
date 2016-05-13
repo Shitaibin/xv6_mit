@@ -290,7 +290,7 @@ mem_init_mp(void)
                     KSTACKTOP - KSTKSIZE - i * (KSTKSIZE + KSTKGAP),
                     KSTKSIZE,
                     PADDR(percpu_kstacks[i]),
-                    PTE_W);
+                    (PTE_W | PTE_P));
   }
 }
 
@@ -690,12 +690,20 @@ mmio_map_region(physaddr_t pa, size_t size)
 	// Hint: The staff solution uses boot_map_region.
 	//
 	// Your code here:
-  void *ret = (void *)base;
-  size = ROUNDUP(size, PGSIZE);
-  boot_map_region(kern_pgdir, base, size, pa,
-                  (PTE_PCD | PTE_PWT | PTE_P));
+  cprintf("mmio_map_region\n");
+//  void *ret = (void *)base;
+//  size = ROUNDUP(size, PGSIZE);
+//  boot_map_region(kern_pgdir, base, size, pa,
+//                  (PTE_PCD | PTE_PWT | PTE_P));
+//  base += size;
+//  return ret;
+  size = ROUNDUP(pa + size, PGSIZE);
+  pa = ROUNDDOWN(pa, PGSIZE);
+  size -= pa;
+  if (base + size >= MMIOLIM) panic("Not enough memory");
+  boot_map_region(kern_pgdir, base, size, pa, PTE_PCD|PTE_PWT|PTE_W);
   base += size;
-  return ret;
+  return (void *)(base - size);
 	//panic("mmio_map_region not implemented");
 }
 
