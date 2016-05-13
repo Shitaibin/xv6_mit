@@ -305,6 +305,12 @@ page_init(void)
 	// LAB 4:
 	// Change your code to mark the physical page at MPENTRY_PADDR
 	// as in use
+  size_t i;
+  for (i = 1; i < MPENTRY_PADDR/PGSIZE; i++) {
+    pages[i].pp_ref = 0;
+    pages[i].pp_link = page_free_list;
+    page_free_list = &pages[i];
+  }
 
 	// The example code here marks all physical pages as free.
 	// However this is not truly the case.  What memory is free?
@@ -323,7 +329,6 @@ page_init(void)
 	// Change the code to reflect this.
 	// NB: DO NOT actually touch the physical memory corresponding to
 	// free pages!
-	size_t i;
   size_t first_free_byte, first_free_page;
   
   // 1)
