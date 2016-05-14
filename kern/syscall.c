@@ -86,8 +86,16 @@ sys_exofork(void)
 	// status is set to ENV_NOT_RUNNABLE, and the register set is copied
 	// from the current environment -- but tweaked so sys_exofork
 	// will appear to return 0.
-
 	// LAB 4: Your code here.
+  struct Env *env_ptr;
+  int ret = env_alloc(&env_ptr, curenv->env_id);
+  if (ret) return ret; // failed
+  env_ptr->env_tf = curenv->env_tf;
+  env_ptr->env_status = ENV_NOT_RUNNABLE;
+  env_ptr->env_tf.tf_regs.reg_eax = 0;
+  cprintf("[%x] pgdir: %d\n", env_ptr, env_ptr->env_pgdir);
+
+  return env_ptr->env_id;
 	panic("sys_exofork not implemented");
 }
 
@@ -108,6 +116,14 @@ sys_env_set_status(envid_t envid, int status)
 	// envid's status.
 
 	// LAB 4: Your code here.
+  if (status != ENV_RUNNABLE && status != ENV_NOT_RUNNABLE)
+    return -E_INVAL;
+  struct Env *env_ptr;
+  int ret;
+  if ((ret = envid2env(envid, &env_ptr, 1)))
+    return ret;
+  env_ptr->env_status = status;
+  return 0; 
 	panic("sys_env_set_status not implemented");
 }
 
@@ -153,6 +169,22 @@ sys_page_alloc(envid_t envid, void *va, int perm)
 	//   allocated!
 
 	// LAB 4: Your code here.
+  struct Env *env;
+  int ret = envid2env(envid, &env, 1);
+  if (ret) return ret;  // bad env
+  if (va >= (void*)UTOP) return -E_INVAL; // beyond
+  int flag = (PTE_U | PTE_P);
+  if ((perm & flag) != flag) return -E_INVAL;
+
+  struct PageInfo *pg = page_alloc(1);
+  if (!pg) return -E_INVAL;
+  pg->pp_ref++;
+  ret = page_insert(env->env_pgdir, pg, va, perm);
+  if (ret) {
+    page_free(pg);
+    return ret;
+  }
+  return 0;
 	panic("sys_page_alloc not implemented");
 }
 
@@ -184,6 +216,30 @@ sys_page_map(envid_t srcenvid, void *srcva,
 	//   check the current permissions on the page.
 
 	// LAB 4: Your code here.
+  struct Env *srcenv, *dstenv;
+  int ret = envid2env(srcenvid, &srcenv, 1);
+  if (ret) return ret;
+  ret = envid2env(dstenvid, &dstenv, 1);
+  if (ret) return ret;
+  cprintf("srcenv: %x, dstenv: %x, srcva: %x, dstva: %x\n",
+      srcenv->env_id, dstenv->env_id, srcva, dstva);
+
+  if (srcva >= (void*) UTOP || dstva >= (void*)UTOP ||
+      ROUNDDOWN(srcva, PGSIZE) != srcva ||
+      ROUNDDOWN(dstva, PGSIZE) != dstva)
+  return -E_INVAL;
+
+  pte_t *pte;
+  struct PageInfo *pg = page_lookup(srcenv->env_pgdir, srcva, &pte);
+  if (!pg) return -E_INVAL;
+
+  int flag = (PTE_U|PTE_P);
+  if ((perm & flag) != flag) return -E_INVAL;
+
+  if (((*pte & PTE_W) == 0) && (perm & PTE_W)) return -E_INVAL;
+
+  ret = page_insert(dstenv->env_pgdir, pg, dstva, perm);
+  return ret;
 	panic("sys_page_map not implemented");
 }
 
@@ -200,6 +256,13 @@ sys_page_unmap(envid_t envid, void *va)
 	// Hint: This function is a wrapper around page_remove().
 
 	// LAB 4: Your code here.
+  if (va >= (void*)UTOP || ROUNDDOWN(va, PGSIZE) != va)
+    return -E_INVAL;
+  struct Env *env;
+  int ret = envid2env(envid, &env, 1);
+  if (ret) return ret;
+  page_remove(env->env_pgdir, va);
+  return 0;
 	panic("sys_page_unmap not implemented");
 }
 
