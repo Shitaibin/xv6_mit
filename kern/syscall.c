@@ -96,7 +96,7 @@ sys_exofork(void)
   cprintf("[%x] pgdir: %d\n", env_ptr, env_ptr->env_pgdir);
 
   return env_ptr->env_id;
-	panic("sys_exofork not implemented");
+	panic("-----------------------sys_exofork not implemented-----------");
 }
 
 // Set envid's env_status to status, which must be ENV_RUNNABLE
@@ -139,6 +139,11 @@ static int
 sys_env_set_pgfault_upcall(envid_t envid, void *func)
 {
 	// LAB 4: Your code here.
+  struct Env *env;
+  int ret = envid2env(envid, &env, 1);
+  if (ret) return ret;
+  env->env_pgfault_upcall = func;
+  return 0;
 	panic("sys_env_set_pgfault_upcall not implemented");
 }
 
