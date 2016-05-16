@@ -73,40 +73,54 @@ trap_init(void)
 	extern struct Segdesc gdt[];
 
 	// LAB 3: Your code here.
-  void th0();
-  void th1();
-  void th3();
-  void th4();
-  void th5();
-  void th6();
-  void th7();
-  void th8();
-  void th9();
-  void th10();
-  void th11();
-  void th12();
-  void th13();
-  void th14();
-  void th16();
-  void th48();
+//  void th0();
+//  void th1();
+//  void th3();
+//  void th4();
+//  void th5();
+//  void th6();
+//  void th7();
+//  void th8();
+//  void th9();
+//  void th10();
+//  void th11();
+//  void th12();
+//  void th13();
+//  void th14();
+//  void th16();
+//  void th48();
+//
+//  SETGATE(idt[0], 0, GD_KT, th0, 0);
+//  SETGATE(idt[1], 0, GD_KT, th1, 0);
+//  // modify dpl of T_BRKPT to allow users to invoke breakpoint exception
+//  SETGATE(idt[3], 0, GD_KT, th3, 3); 
+//  SETGATE(idt[4], 0, GD_KT, th4, 0);
+//  SETGATE(idt[5], 0, GD_KT, th5, 0);
+//  SETGATE(idt[6], 0, GD_KT, th6, 0);
+//  SETGATE(idt[7], 0, GD_KT, th7, 0);
+//  SETGATE(idt[8], 0, GD_KT, th8, 0);
+//  SETGATE(idt[9], 0, GD_KT, th9, 0);
+//  SETGATE(idt[10], 0, GD_KT, th10, 0);
+//  SETGATE(idt[11], 0, GD_KT, th11, 0);
+//  SETGATE(idt[12], 0, GD_KT, th12, 0);
+//  SETGATE(idt[13], 0, GD_KT, th13, 0);
+//  SETGATE(idt[14], 0, GD_KT, th14, 0);
+//  SETGATE(idt[16], 0, GD_KT, th16, 0);
+//  SETGATE(idt[48], 0, GD_KT, th48, 3); // system call
+//
+  extern void (*funs[])();
+  size_t i;
+  for (i = 0; i <= 16; i++) 
+    if (i == T_BRKPT)
+      SETGATE(idt[i], 0, GD_KT, funs[i], 3)
+    else if (i != 2 && i != 15) 
+      SETGATE(idt[i], 0, GD_KT, funs[i], 0)
 
-  SETGATE(idt[0], 0, GD_KT, th0, 0);
-  SETGATE(idt[1], 0, GD_KT, th1, 0);
-  // modify dpl of T_BRKPT to allow users to invoke breakpoint exception
-  SETGATE(idt[3], 0, GD_KT, th3, 3); 
-  SETGATE(idt[4], 0, GD_KT, th4, 0);
-  SETGATE(idt[5], 0, GD_KT, th5, 0);
-  SETGATE(idt[6], 0, GD_KT, th6, 0);
-  SETGATE(idt[7], 0, GD_KT, th7, 0);
-  SETGATE(idt[8], 0, GD_KT, th8, 0);
-  SETGATE(idt[9], 0, GD_KT, th9, 0);
-  SETGATE(idt[10], 0, GD_KT, th10, 0);
-  SETGATE(idt[11], 0, GD_KT, th11, 0);
-  SETGATE(idt[12], 0, GD_KT, th12, 0);
-  SETGATE(idt[13], 0, GD_KT, th13, 0);
-  SETGATE(idt[14], 0, GD_KT, th14, 0);
-  SETGATE(idt[16], 0, GD_KT, th16, 0);
-  SETGATE(idt[48], 0, GD_KT, th48, 3); // system call
+  SETGATE(idt[48], 0, GD_KT, funs[48], 3);
+
+  for (i = 0; i < 16; i++) {
+    SETGATE(idt[IRQ_OFFSET+i], 0, GD_KT, funs[IRQ_OFFSET+i], 0);
+  }
 
 	//Per-CPU setup 
 	trap_init_percpu();
