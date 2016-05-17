@@ -377,7 +377,7 @@ page_alloc(int alloc_flags)
 	if (page_free_list) {
 		struct PageInfo *ret = page_free_list;
 		page_free_list = page_free_list->pp_link;
-		cprintf("alocccccccccccccc pa: %x\n", page2pa(ret));
+		// cprintf("alocccccccccccccc pa: %x\n", page2pa(ret));
 		if (alloc_flags & ALLOC_ZERO) 
 			memset(page2kva(ret), 0, PGSIZE);
 		return ret;
@@ -392,7 +392,7 @@ page_alloc(int alloc_flags)
 void
 page_free(struct PageInfo *pp)
 {
-	cprintf("freeeeeeeeeee pa: %x\n", page2pa(pp));
+	// cprintf("freeeeeeeeeee pa: %x\n", page2pa(pp));
 	pp->pp_link = page_free_list;
 	page_free_list = pp;
 }
