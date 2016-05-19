@@ -214,7 +214,19 @@ serve_read(envid_t envid, union Fsipc *ipc)
 		cprintf("serve_read %08x %08x %08x\n", envid, req->req_fileid, req->req_n);
 
 	// Lab 5: Your code here:
-	return 0;
+  int r;
+  struct OpenFile *of = NULL;
+  size_t nbytes = 0;
+  r = openfile_lookup(envid, req->req_fileid, &of);
+  if (r) {
+    cprintf("serve_write: failed to lookup open file.\n");
+    return r;
+  }
+
+  nbytes = file_read(of->o_file, (void *)ret, req->req_n, of->o_fd->fd_offset);
+  if (nbytes >= 0)
+    of->o_fd->fd_offset += nbytes;
+  return nbytes;
 }
 
 
@@ -229,6 +241,17 @@ serve_write(envid_t envid, struct Fsreq_write *req)
 		cprintf("serve_write %08x %08x %08x\n", envid, req->req_fileid, req->req_n);
 
 	// LAB 5: Your code here.
+  struct OpenFile *of = NULL;
+  size_t nbytes = 0;
+  int r = openfile_lookup(envid, req->req_fileid, &of);
+  if (r < 0) {
+    cprintf("failed to lookup open file.\n");
+    return r;
+  }
+  nbytes = file_write(of->o_file, (void *)req->req_buf, nbytes, of->o_fd->fd_offset);
+  if (nbytes >= 0)
+    of->o_fd->fd_offset += nbytes;
+  return nbytes;
 	panic("serve_write not implemented");
 }
 
